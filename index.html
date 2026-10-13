@@ -1,0 +1,520 @@
+<!doctype html>
+<html lang="kk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Сабақ кезеңдері бойынша бағалау</title>
+
+  <style>
+    :root {
+      font-family: system-ui, Arial, sans-serif;
+      color: #17304b;
+      background: #f3f7fb;
+    }
+
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    main { max-width: 1200px; margin: auto; padding: 28px 18px; }
+    h1 { margin: 0 0 8px; font-size: clamp(25px, 4vw, 38px); }
+    p { color: #52657a; }
+
+    .card {
+      background: white;
+      border: 1px solid #dce7f1;
+      border-radius: 18px;
+      padding: 22px;
+      margin: 18px 0;
+      box-shadow: 0 8px 24px #163a5510;
+    }
+
+    label { display: block; font-weight: 650; margin: 10px 0 6px; }
+
+    input {
+      font: inherit;
+      padding: 9px;
+      border: 1px solid #b8cadb;
+      border-radius: 9px;
+      max-width: 100%;
+    }
+
+    input[type="number"] { width: 86px; }
+    input[type="text"] { width: 230px; }
+    input[type="file"] { width: 100%; }
+
+    button {
+      font: inherit;
+      background: #1668c1;
+      color: white;
+      border: 0;
+      border-radius: 9px;
+      padding: 10px 15px;
+      cursor: pointer;
+      margin: 8px 8px 3px 0;
+    }
+
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    .secondary { background: #e5effa; color: #154d86; }
+    .row { display: flex; gap: 14px; flex-wrap: wrap; align-items: end; }
+
+    .stage {
+      display: flex;
+      gap: 12px;
+      align-items: end;
+      flex-wrap: wrap;
+      padding: 10px 0;
+      border-bottom: 1px solid #e6edf4;
+    }
+
+    .stage:last-child { border: 0; }
+    .stage strong { padding-bottom: 11px; }
+    small { color: #64778a; }
+    .error { color: #a61c36; }
+    .success { color: #137151; }
+    .table-wrap { overflow-x: auto; }
+
+    table { border-collapse: collapse; width: 100%; min-width: 540px; }
+    th, td { padding: 10px; border-bottom: 1px solid #e3ebf3; text-align: left; }
+    th { background: #eaf2fb; white-space: nowrap; }
+    td input { width: 78px !important; }
+    .total { font-weight: 750; }
+    .invalid { background: #fff0f1; color: #aa1833; }
+    #message { min-height: 1.5em; }
+    footer { font-size: 13px; color: #64778a; margin-top: 20px; }
+  </style>
+</head>
+
+<body>
+  <main>
+    <h1>Сабақ кезеңдері бойынша бағалау</h1>
+    <p>
+      Кезеңдерді баптаңыз, Excel тізімін жүктеңіз және әр оқушының балын
+      енгізіңіз. Жалпы шек — 10 балл.
+    </p>
+
+    <section class="card">
+      <h2>1. Кезеңдер</h2>
+      <div class="row">
+        <div>
+          <label for="count">Кезең саны</label>
+          <input id="count" type="number" min="1" max="20" step="1" value="3">
+        </div>
+        <button id="build">Кезеңдерді құру</button>
+      </div>
+      <div id="stages"></div>
+      <p id="maximumInfo"></p>
+    </section>
+
+    <section class="card">
+      <h2>2. Оқушылар тізімі</h2>
+      <label for="file">Excel файлы (.xls немесе .xlsx)</label>
+      <input id="file" type="file" accept=".xls,.xlsx">
+      <p>
+        <small>
+          Бірінші парақтың бірінші бағанындағы оқушы аттары алынады.
+          «№», «Оқушының аты-жөні» сияқты тақырып жолдары өткізіледі.
+        </small>
+      </p>
+      <p id="studentInfo">Файл таңдалмаған.</p>
+    </section>
+
+    <section class="card">
+      <h2>3. Баллдар мен қорытынды</h2>
+      <div class="row">
+        <button id="download" disabled>Қорытындыны Excel-ге жүктеу</button>
+        <button id="clear" class="secondary" disabled>Баллдарды тазалау</button>
+      </div>
+      <p id="message" role="status" aria-live="polite"></p>
+      <div class="table-wrap">
+        <table id="results">
+          <thead></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <footer>
+      Excel оқу және жүктеу үшін интернет байланысы қажет.
+      Жүктеген тізім браузер ішінде өңделеді.
+    </footer>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script>
+    'use strict';
+
+    const $ = id => document.getElementById(id);
+
+    let stages = [
+      { name: 'Сабақтың басы', max: 2 },
+      { name: 'Сабақтың ортасы', max: 6 },
+      { name: 'Сабақтың соңы', max: 2 }
+    ];
+    let students = [];
+    let scores = [];
+
+    function sumMax() {
+      return stages.reduce((sum, stage) => sum + Number(stage.max || 0), 0);
+    }
+
+    function validStages() {
+      return stages.length > 0 &&
+        stages.every(stage =>
+          stage.name.trim() &&
+          Number.isFinite(Number(stage.max)) &&
+          Number(stage.max) >= 0 &&
+          Number(stage.max) <= 10
+        ) &&
+        sumMax() <= 10.000001;
+    }
+
+    function show(message, isError = false) {
+      $('message').textContent = message;
+      $('message').className = isError ? 'error' : 'success';
+    }
+
+    function renderStages() {
+      const box = $('stages');
+      box.replaceChildren();
+
+      stages.forEach((stage, index) => {
+        const line = document.createElement('div');
+        line.className = 'stage';
+
+        const title = document.createElement('strong');
+        title.textContent = `${index + 1}-кезең`;
+
+        const nameBox = document.createElement('div');
+        const nameLabel = document.createElement('label');
+        nameLabel.textContent = 'Кезең атауы';
+
+        const nameInput = document.createElement('input');
+        nameInput.type = 'text';
+        nameInput.value = stage.name;
+        nameInput.maxLength = 80;
+        nameInput.addEventListener('input', () => {
+          stage.name = nameInput.value;
+          renderMaximum();
+          renderTable();
+        });
+        nameBox.append(nameLabel, nameInput);
+
+        const maxBox = document.createElement('div');
+        const maxLabel = document.createElement('label');
+        maxLabel.textContent = 'Ең жоғары балл';
+
+        const maxInput = document.createElement('input');
+        maxInput.type = 'number';
+        maxInput.min = '0';
+        maxInput.max = '10';
+        maxInput.step = '0.5';
+        maxInput.value = stage.max;
+        maxInput.addEventListener('input', () => {
+          stage.max = maxInput.value;
+          renderMaximum();
+          renderTable();
+        });
+        maxBox.append(maxLabel, maxInput);
+
+        line.append(title, nameBox, maxBox);
+        box.append(line);
+      });
+
+      renderMaximum();
+      renderTable();
+    }
+
+    function renderMaximum() {
+      const total = sumMax();
+      const isValid = validStages();
+
+      $('maximumInfo').textContent =
+        `Кезеңдер бойынша ең жоғары балл: ${total.toLocaleString('kk-KZ')} / 10. ` +
+        (isValid
+          ? ''
+          : 'Атауларды толтырып, жиынтық шекті 10 баллдан асырмаңыз.');
+
+      $('maximumInfo').className = isValid ? 'success' : 'error';
+    }
+
+    function renderTable() {
+      const head = $('results').querySelector('thead');
+      const body = $('results').querySelector('tbody');
+
+      head.replaceChildren();
+      body.replaceChildren();
+
+      $('download').disabled = !students.length || !validStages();
+      $('clear').disabled = !students.length;
+
+      if (!students.length) return;
+
+      const headerRow = document.createElement('tr');
+      const titles = [
+        '№',
+        'Оқушы',
+        ...stages.map((stage, index) =>
+          `${stage.name.trim() || `${index + 1}-кезең`} (макс. ${stage.max})`
+        ),
+        'Қорытынды / 10'
+      ];
+
+      titles.forEach(title => {
+        const cell = document.createElement('th');
+        cell.textContent = title;
+        headerRow.append(cell);
+      });
+      head.append(headerRow);
+
+      students.forEach((name, studentIndex) => {
+        const row = document.createElement('tr');
+
+        [String(studentIndex + 1), name].forEach(value => {
+          const cell = document.createElement('td');
+          cell.textContent = value;
+          row.append(cell);
+        });
+
+        stages.forEach((stage, stageIndex) => {
+          const cell = document.createElement('td');
+          const input = document.createElement('input');
+
+          input.type = 'number';
+          input.min = '0';
+          input.max = String(stage.max);
+          input.step = '0.5';
+          input.setAttribute('aria-label', `${name}, ${stage.name}`);
+          input.value = scores[studentIndex]?.[stageIndex] ?? '';
+
+          input.addEventListener('change', () => {
+            const value = input.value.trim();
+
+            if (value === '') {
+              scores[studentIndex][stageIndex] = '';
+              updateTotals();
+              return;
+            }
+
+            const number = Number(value);
+            const otherScores = scores[studentIndex].reduce(
+              (sum, score, index) =>
+                sum + (index === stageIndex ? 0 : Number(score || 0)),
+              0
+            );
+
+            if (
+              !Number.isFinite(number) ||
+              number < 0 ||
+              number > Number(stage.max) ||
+              otherScores + number > 10.000001
+            ) {
+              input.value = scores[studentIndex][stageIndex] ?? '';
+              show(
+                `${name}: балл 0–${stage.max} аралығында болуы ` +
+                'және қорытынды 10-нан аспауы керек.',
+                true
+              );
+              return;
+            }
+
+            scores[studentIndex][stageIndex] = number;
+            show('');
+            updateTotals();
+          });
+
+          cell.append(input);
+          row.append(cell);
+        });
+
+        const totalCell = document.createElement('td');
+        totalCell.className = 'total';
+        row.append(totalCell);
+        body.append(row);
+      });
+
+      updateTotals();
+    }
+
+    function updateTotals() {
+      const rows = [...$('results').querySelector('tbody').rows];
+
+      rows.forEach((row, index) => {
+        const sum = (scores[index] || [])
+          .reduce((total, score) => total + Number(score || 0), 0);
+
+        const totalCell = row.lastElementChild;
+        totalCell.textContent = sum.toLocaleString('kk-KZ', {
+          maximumFractionDigits: 2
+        });
+        totalCell.classList.toggle('invalid', sum > 10);
+      });
+    }
+
+    $('build').addEventListener('click', () => {
+      const count = Number($('count').value);
+
+      if (!Number.isInteger(count) || count < 1 || count > 20) {
+        show('Кезең саны 1 мен 20 аралығында болуы керек.', true);
+        return;
+      }
+
+      stages = Array.from(
+        { length: count },
+        (_, index) => stages[index] || {
+          name: `${index + 1}-кезең`,
+          max: 0
+        }
+      );
+
+      scores = scores.map(row =>
+        Array.from({ length: count }, (_, index) => row[index] ?? '')
+      );
+
+      show('');
+      renderStages();
+    });
+
+    $('file').addEventListener('change', async event => {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      if (!/\.xlsx?$/i.test(file.name)) {
+        show('Тек .xls немесе .xlsx файлын таңдаңыз.', true);
+        return;
+      }
+
+      if (typeof XLSX === 'undefined') {
+        show(
+          'Excel оқу құралы жүктелмеді. Интернет байланысын тексеріп, бетті жаңартыңыз.',
+          true
+        );
+        return;
+      }
+
+      try {
+        const data = await file.arrayBuffer();
+        const workbook = XLSX.read(data, { type: 'array' });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(sheet, {
+          header: 1,
+          defval: ''
+        });
+
+        const names = rows
+          .map(row => String(row[0] ?? '').trim())
+          .filter(value =>
+            value &&
+            !/^№$|^no\.?$|^оқушы(ның)?\s*(аты|аты-жөні|тізімі)?$|^аты[-\s]?жөні$|^аты\s+жөні$|^оқушылар$/i.test(value) &&
+            !/^[0-9]+$/.test(value)
+          );
+
+        if (!names.length) {
+          throw Error(
+            'Бірінші бағаннан оқушылар табылмады. ' +
+            'Аттарды бірінші бағанға орналастырыңыз.'
+          );
+        }
+
+        students = names;
+        scores = students.map(() => stages.map(() => ''));
+
+        $('studentInfo').textContent =
+          `${file.name}: ${names.length} оқушы жүктелді.`;
+
+        show('Оқушылар тізімі дайын. Кезеңдерге балл енгізіңіз.');
+        renderTable();
+      } catch (error) {
+        show('Файлды оқу қатесі: ' + error.message, true);
+      }
+    });
+
+    $('clear').addEventListener('click', () => {
+      scores = students.map(() => stages.map(() => ''));
+      renderTable();
+      show('Баллдар тазаланды.');
+    });
+
+    $('download').addEventListener('click', () => {
+      if (typeof XLSX === 'undefined') {
+        show('Интернет байланысын тексеріңіз.', true);
+        return;
+      }
+
+      if (!validStages()) {
+        show(
+          'Кезең атаулары мен ең жоғары баллдарды тексеріңіз: ' +
+          'жиынтық 10-нан аспасын.',
+          true
+        );
+        return;
+      }
+
+      for (let i = 0; i < students.length; i++) {
+        const sum = scores[i].reduce((total, score, index) => {
+          const number = Number(score || 0);
+
+          if (
+            !Number.isFinite(number) ||
+            number < 0 ||
+            number > Number(stages[index].max)
+          ) {
+            return 11;
+          }
+
+          return total + number;
+        }, 0);
+
+        if (sum > 10.000001) {
+          show(`${students[i]} үшін баллдарды тексеріңіз.`, true);
+          return;
+        }
+      }
+
+      const rows = [
+        [
+          '№',
+          'Оқушы',
+          ...stages.map(stage =>
+            `${stage.name} (ең көбі ${stage.max})`
+          ),
+          'Қорытынды (10 балл)'
+        ],
+        ...students.map((name, index) => [
+          index + 1,
+          name,
+          ...stages.map((_, stageIndex) =>
+            scores[index][stageIndex] === ''
+              ? ''
+              : Number(scores[index][stageIndex])
+          ),
+          scores[index].reduce(
+            (sum, score) => sum + Number(score || 0),
+            0
+          )
+        ])
+      ];
+
+      const resultSheet = XLSX.utils.aoa_to_sheet(rows);
+      resultSheet['!cols'] = [
+        { wch: 6 },
+        { wch: 28 },
+        ...stages.map(() => ({ wch: 23 })),
+        { wch: 23 }
+      ];
+
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(
+        workbook,
+        resultSheet,
+        'Қорытынды'
+      );
+
+      XLSX.writeFile(
+        workbook,
+        'sabak_bagalau_korytyndy.xlsx'
+      );
+    });
+
+    renderStages();
+  </script>
+</body>
+</html>
